@@ -13,7 +13,7 @@ DDPG/checkpoint_critic.pth
 combination/videos-test/
 combination/theta_table_values.npy
 combination/theta_table_values-3.npy
-combination/ars_theta_table_values-0ld.npy
+
 combination/*.npy
 combination/DDPG/checkpoint_actor.pth
 combination/DDPG/checkpoint_critic.pth
