@@ -8,6 +8,7 @@ from model import Actor, Critic
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+import torch.nn as nn
 
 BUFFER_SIZE = int(1e6)  # replay buffer size
 BATCH_SIZE = 32        # minibatch size; it was 128
@@ -21,7 +22,7 @@ WEIGHT_DECAY = 0.0   # L2 weight decay
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-class Agent():
+class Agent(nn.Module):
     """Interacts with and learns from the environment."""
     
     def __init__(self, state_size, action_size, random_seed, freeze_actor, pretrained_actor=None):
@@ -33,6 +34,7 @@ class Agent():
             action_size (int): dimension of each action
             random_seed (int): random seed
         """
+        super(Agent, self).__init__()
         self.state_size = state_size
         self.action_size = action_size
         self.seed = random.seed(random_seed)
@@ -50,10 +52,10 @@ class Agent():
         self.critic_optimizer = optim.Adam(self.critic_local.parameters(), lr=LR_CRITIC, weight_decay=WEIGHT_DECAY)
 
         # Noise process
-        self.noise = OUNoise(action_size, random_seed)
+        self.noise = OUNoise(action_size, random_seed).to(device)
 
         # Replay memory
-        self.memory = ReplayBuffer(action_size, BUFFER_SIZE, BATCH_SIZE, random_seed)
+        self.memory = ReplayBuffer(action_size, BUFFER_SIZE, BATCH_SIZE, random_seed).to(device)
     
     def step(self, state, action, reward, next_state, done):
         """Save experience in replay memory, and use random sample from buffer to learn."""
@@ -139,11 +141,12 @@ class Agent():
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
 
-class OUNoise:
+class OUNoise(nn.Module):
     """Ornstein-Uhlenbeck process."""
 
     def __init__(self, size, seed, mu=0., theta=0.15, sigma=0.2):
         """Initialize parameters and noise process."""
+        super(OUNoise, self).__init__()
         self.mu = mu * np.ones(size)
         self.theta = theta
         self.sigma = sigma
@@ -161,7 +164,7 @@ class OUNoise:
         self.state = x + dx
         return self.state
 
-class ReplayBuffer:
+class ReplayBuffer(nn.Module):
     """Fixed-size buffer to store experience tuples."""
 
     def __init__(self, action_size, buffer_size, batch_size, seed):
@@ -171,6 +174,7 @@ class ReplayBuffer:
             buffer_size (int): maximum size of buffer
             batch_size (int): size of each training batch
         """
+        super(ReplayBuffer, self).__init__()
         self.action_size = action_size
         self.memory = deque(maxlen=buffer_size)  # internal memory (deque)
         self.batch_size = batch_size

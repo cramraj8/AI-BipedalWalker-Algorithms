@@ -8,9 +8,9 @@ import numpy as np
 import gym
 from gym import wrappers
 from glob import glob
-import pandas as pd
-import time
 
+# MODEL_DIR = 'Updated Copy of ars_theta_table_values.npy'
+MODEL_DIR = "ars_theta_table_values.npy"
 
 class HP():
     # Hyperparameters
@@ -41,6 +41,8 @@ class HP():
         self.weights_dir = None
         self.max_savedfiles = max_savedfiles
 
+        self.test_mode = True
+
 
 class Normalizer():
     # Normalizes the inputs
@@ -64,12 +66,16 @@ class Normalizer():
 
 
 class Policy():
-    def __init__(self, input_size, output_size, hp):
-        self.theta = np.zeros((output_size, input_size))
+    def __init__(self, input_size, output_size, hp):    
         self.hp = hp
+        if self.hp.test_mode:
+            self.theta = np.load(MODEL_DIR)
+        else:
+            self.theta = np.zeros((output_size, input_size))
 
     def evaluate(self, input, delta=None, direction=None):
         if direction is None:
+            print('Computing dots')
             return self.theta.dot(input)
         elif direction == "+":
             return (self.theta + self.hp.noise * delta).dot(input)
@@ -96,14 +102,12 @@ class Policy():
 
         if self.hp.step % self.hp.record_every == 0:
             if self.is_dir_overflowing():
-                ckpt_files = glob(os.path.join(
-                    self.hp.weights_dir, "theta_table_values_i_*.npy"))
+                ckpt_files = glob(os.path.join(self.hp.weights_dir, "theta_table_values_i_*.npy"))
                 ckpt_files.sort()
-                # print('removing file : ', ckpt_files[0])
+                print('removing file : ', ckpt_files[0])
                 os.remove(ckpt_files[0])
-            # print('step now : ', self.hp.step)
-            np.save(os.path.join(self.hp.weights_dir,
-                                 "theta_table_values_i_%s.npy" % self.hp.step), self.theta)
+            print('step now : ', self.hp.step)
+            np.save(os.path.join(self.hp.weights_dir, "theta_table_values_i_%s.npy"% self.hp.step), self.theta)
 
 
 class ARSTrainer():
@@ -138,74 +142,54 @@ class ARSTrainer():
         num_plays = 0.0
         sum_rewards = 0.0
         while not done and num_plays < self.hp.episode_length:
+            if self.hp.test_mode:
+                self.env.render()
             self.normalizer.observe(state)
             state = self.normalizer.normalize(state)
             action = self.policy.evaluate(state, delta, direction)
             state, reward, done, _ = self.env.step(action)
+            reward = max(min(reward, 1), -1)
             # reward = max(min(reward, 1), -1)
             sum_rewards += reward
             num_plays += 1
         return sum_rewards
 
-    def train(self):
-        start_time = time.time()
-
-        track_avg_rewards = {}
-        track_avg_rewards['Rewards'] = []
-
-        track_elap_time = {}
-        track_elap_time['Time'] = []
-        track_elap_time['FormattertTime'] = []
+    def test(self):
         for step in range(self.hp.nb_steps):
-            # initialize the random noise deltas and the positive/negative rewards
-            deltas = self.policy.sample_deltas()
-            positive_rewards = [0] * self.hp.num_deltas
-            negative_rewards = [0] * self.hp.num_deltas
+            # # initialize the random noise deltas and the positive/negative rewards
+            # deltas = self.policy.sample_deltas()
+            # positive_rewards = [0] * self.hp.num_deltas
+            # negative_rewards = [0] * self.hp.num_deltas
 
-            # play an episode each with positive deltas and negative deltas, collect rewards
-            for k in range(self.hp.num_deltas):
-                positive_rewards[k] = self.explore(
-                    direction="+", delta=deltas[k])
-                negative_rewards[k] = self.explore(
-                    direction="-", delta=deltas[k])
+            # # play an episode each with positive deltas and negative deltas, collect rewards
+            # for k in range(self.hp.num_deltas):
+            #     positive_rewards[k] = self.explore(
+            #         direction="+", delta=deltas[k])
+            #     negative_rewards[k] = self.explore(
+            #         direction="-", delta=deltas[k])
 
-            # Compute the standard deviation of all rewards
-            sigma_rewards = np.array(positive_rewards + negative_rewards).std()
+            # # Compute the standard deviation of all rewards
+            # sigma_rewards = np.array(positive_rewards + negative_rewards).std()
 
-            # Sort the rollouts by the max(r_pos, r_neg) and select the deltas with best rewards
-            scores = {k: max(r_pos, r_neg) for k, (r_pos, r_neg) in enumerate(
-                zip(positive_rewards, negative_rewards))}
-            order = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)[
-                :self.hp.num_best_deltas]
-            rollouts = [(positive_rewards[k], negative_rewards[k], deltas[k])
-                        for k in order]
+            # # Sort the rollouts by the max(r_pos, r_neg) and select the deltas with best rewards
+            # scores = {k: max(r_pos, r_neg) for k, (r_pos, r_neg) in enumerate(
+            #     zip(positive_rewards, negative_rewards))}
+            # order = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)[
+            #     :self.hp.num_best_deltas]
+            # rollouts = [(positive_rewards[k], negative_rewards[k], deltas[k])
+            #             for k in order]
 
             # Update the policy
-            self.policy.update(rollouts, sigma_rewards)
+            # self.policy.update(rollouts, sigma_rewards)
 
             # Only record video during evaluation, every n steps
-            if step % self.hp.record_every == 0:
-                self.record_video = True
+            # if step % self.hp.record_every == 0:
+            #     self.record_video = True
             # Play an episode with the new weights and print the score
             reward_evaluation = self.explore()
-
-            elapsed_time = time.time() - start_time
-            formatted_elapsed_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_time))
-            
-            track_elap_time['Time'].append(elapsed_time)
-            track_elap_time['FormattertTime'].append(formatted_elapsed_time)
-
-            df_time = pd.DataFrame(track_elap_time)
-            df_time.to_csv("elapsed_times.csv")
-
-            print('Step: ', step, ' Elapsed Time: ',
-                  formatted_elapsed_time, ' Reward: ', reward_evaluation)
+            # print('Step: ', step, 'Reward: ', reward_evaluation)
             self.record_video = False
             self.hp.step = step
-
-            track_avg_rewards['Rewards'].append(reward_evaluation)
-            df = pd.DataFrame(track_avg_rewards)
-            df.to_csv("scores.csv")
 
 
 def mkdir(base, name):
@@ -226,6 +210,5 @@ if __name__ == '__main__':
 
     hp = HP(env_name=ENV_NAME)
 
-    trainer = ARSTrainer(hp=hp, monitor_dir=monitor_dir,
-                         weights_dir=WEIGHTS_DIR)
-    trainer.train()
+    trainer = ARSTrainer(hp=hp, monitor_dir=monitor_dir, weights_dir=WEIGHTS_DIR)
+    trainer.test()
