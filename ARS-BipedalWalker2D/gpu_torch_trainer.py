@@ -7,14 +7,15 @@ import os
 import numpy as np
 import gym
 from gym import wrappers
-# import torch
+import torch
+import torch.nn as nn
 
 # # Start virtual display
 # display = Display(visible=0, size=(1024, 768))
 # display.start()
 # os.environ["DISPLAY"] = ":" + str(display.display) + "." + str(display.screen)
 
-# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 class HP():
@@ -63,29 +64,38 @@ class Normalizer():
         return (inputs - obs_mean) / obs_std
 
 
-class Policy():
+class Policy(torch.nn.Module):
     def __init__(self, input_size, output_size, hp):
-        self.theta = np.zeros((output_size, input_size))
+        self.theta =  torch.Tensor(np.zeros((output_size, input_size)))
         self.hp = hp
 
     def evaluate(self, input, delta=None, direction=None):
         if direction is None:
-            return self.theta.dot(input)
+            # return self.theta.dot(input)
+            return torch.dot(self.thet, input)
+            # torch.mm
+            # torch.matmul
         elif direction == "+":
-            return (self.theta + self.hp.noise * delta).dot(input)
+            # return (self.theta + self.hp.noise * delta).dot(input)
+            return torch.dot((self.theta + self.hp.noise * delta), input)
         elif direction == "-":
-            return (self.theta - self.hp.noise * delta).dot(input)
+            # return (self.theta - self.hp.noise * delta).dot(input)
+            return torch.dot((self.theta - self.hp.noise * delta), input)
 
     def sample_deltas(self):
-        return [np.random.randn(*self.theta.shape) for _ in range(self.hp.num_deltas)]
+        # return [np.random.randn(*self.theta.shape) for _ in range(self.hp.num_deltas)]
+        return [torch.randn(*self.theta.shape) for _ in range(self.hp.num_deltas)]
 
     def update(self, rollouts, sigma_rewards):
         # sigma_rewards is the standard deviation of the rewards
         step = np.zeros(self.theta.shape)
+
         for r_pos, r_neg, delta in rollouts:
             step += (r_pos - r_neg) * delta
+
         self.theta += self.hp.learning_rate / \
             (self.hp.num_best_deltas * sigma_rewards) * step
+
         np.save("theta_table_values.npy", self.theta)
 
 
@@ -107,9 +117,14 @@ class ARSTrainer():
         self.hp.episode_length = self.env.spec.timestep_limit or self.hp.episode_length
         self.input_size = input_size or self.env.observation_space.shape[0]
         self.output_size = output_size or self.env.action_space.shape[0]
+
         self.normalizer = normalizer or Normalizer(self.input_size)
+        self.normalizer.to(device)
+
         self.policy = policy or Policy(
             self.input_size, self.output_size, self.hp)
+        self.policy.to(device)
+
         self.record_video = False
 
     # Explore the policy on one specific direction and over one episode
@@ -182,5 +197,5 @@ if __name__ == '__main__':
     hp = HP(env_name=ENV_NAME)
 
     trainer = ARSTrainer(hp=hp, monitor_dir=monitor_dir)
-    # trainer.to(device)
+    trainer.to(device)
     trainer.train()
